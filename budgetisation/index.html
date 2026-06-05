@@ -2074,7 +2074,7 @@
           {/* ── STAT CARDS ── */}
           <div className="stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)'}}>
             <StatCard icon="budgets" iconBg="var(--orange-soft)" value={fmtEUR(totalBudgeted)} label="Dépenses fixes"         delta={`${allocs.filter(c=>c.budget>0).length} postes planifiés`} deltaTone="neu"/>
-            <StatCard icon="expense" iconBg="#FBEFD1"            value={fmtEUR(totalSpent)}    label="Déjà dépensé"          delta={totalBudgeted>0?fmtPct(totalSpent/totalBudgeted*100)+' des enveloppes':'—'} deltaTone="neu"/>
+            <StatCard icon="wallet"  iconBg="var(--green-100)"   value={fmtEUR(Math.max(0,totalBudgeted-totalSpent))} label="Reste à dépenser" delta={totalBudgeted>0?fmtPct(Math.max(0,(totalBudgeted-totalSpent)/totalBudgeted*100))+' des enveloppes':' — '} deltaTone={totalSpent>totalBudgeted?'neg':'pos'}/>
             <StatCard icon="wallet"  iconBg={disposable<0&&available>0?"var(--red-soft)":"var(--green-100)"} value={fmtEUR(Math.max(0,disposable))} label="Reste disponible" delta={disposable<0&&available>0?'Revoir les dépenses fixes':'à distribuer vers objectifs'} deltaTone={disposable<0&&available>0?'neg':'pos'}/>
           </div>
 
