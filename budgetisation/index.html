@@ -3785,7 +3785,7 @@
                   }
                   return;
                 }
-                const url = window.location.origin + window.location.pathname + (gistIdRef.current ? \`?gist=\${gistIdRef.current}\` : '');
+                const url = window.location.origin + window.location.pathname + (gistIdRef.current ? `?gist=${gistIdRef.current}` : '');
                 navigator.clipboard.writeText(url).then(() => toast('Lien copié ! Colle-le sur ton autre appareil', 'check'));
               }}
               style={{
