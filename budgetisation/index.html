@@ -1893,12 +1893,16 @@
        PAGE — DÉPENSES
        ═══════════════════════════════════════════════════ */
     /* Budget category card — allocation + spending progress */
-    const BudgetCatCard = ({ cat, dispatch, toast }) => {
+    const BudgetCatCard = ({ cat, dispatch, toast, selectedMonth }) => {
       const { budget, spent, remaining } = cat;
       const pct     = budget > 0 ? Math.min(100, Math.round((spent/budget)*100)) : (spent > 0 ? 100 : 0);
       const over    = spent > budget && budget > 0;
       const [editing, setEditing] = useState(false);
       const [draftBudget, setDraftBudget] = useState(budget);
+      const [quickAdd, setQuickAdd] = useState(false);
+      const [quickLabel, setQuickLabel] = useState('');
+      const [quickAmount, setQuickAmount] = useState('');
+      const quickRef = useRef(null);
 
       const saveBudget = () => {
         dispatch({type:'SET_CAT_BUDGET', id:cat.id, budget:+draftBudget||0});
@@ -1906,8 +1910,35 @@
         setEditing(false);
       };
 
+      const openQuick = () => { setQuickAdd(true); setEditing(false); setTimeout(()=>quickRef.current?.focus(),0); };
+      const closeQuick = () => { setQuickAdd(false); setQuickLabel(''); setQuickAmount(''); };
+
+      const submitQuick = () => {
+        const amt = parseFloat(quickAmount);
+        if (!quickLabel.trim() || isNaN(amt) || amt <= 0) return;
+        dispatch({
+          type: 'ADD_EXPENSE',
+          payload: {
+            mk: selectedMonth,
+            name: quickLabel.trim(),
+            amount: -Math.abs(amt),
+            cat: cat.id,
+            type: 'variable',
+            method: 'Carte',
+            date: new Date().toISOString().split('T')[0],
+            note: '',
+            status: 'ok',
+          }
+        });
+        toast(`${quickLabel.trim()} · ${fmtEUR(amt)} ajouté`);
+        closeQuick();
+      };
+
+      /* couleur de la jauge selon remplissage */
+      const barColor = over ? 'var(--red)' : pct > 80 ? 'var(--orange)' : 'var(--green-800)';
+
       return (
-        <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:20,padding:'18px 20px',display:'flex',flexDirection:'column',gap:12}}>
+        <div style={{background:'var(--card)',border:`1px solid ${quickAdd?'var(--green-700)':'var(--border)'}`,borderRadius:20,padding:'18px 20px',display:'flex',flexDirection:'column',gap:12,transition:'border-color 180ms ease'}}>
           {/* Header */}
           <div style={{display:'flex',alignItems:'center',gap:12}}>
             <div style={{width:36,height:36,borderRadius:12,background:cat.color+'22',color:cat.color,display:'grid',placeItems:'center',flexShrink:0}}>
@@ -1919,10 +1950,56 @@
                 {budget > 0 ? `${fmtEUR(spent)} dépensé · ${fmtEUR(Math.abs(remaining))} ${remaining>=0?'restant':'de dépassement'}` : 'Aucun budget défini'}
               </div>
             </div>
-            <button className="row-btn" onClick={()=>{setDraftBudget(budget);setEditing(e=>!e);}} title="Modifier le budget" style={{flexShrink:0}}>
+            {/* Bouton saisie rapide */}
+            <button className="row-btn" onClick={quickAdd ? closeQuick : openQuick}
+              title={quickAdd ? 'Annuler' : 'Saisir une dépense'}
+              style={{flexShrink:0,background:quickAdd?'var(--green-100)':'',color:quickAdd?'var(--green-800)':''}}>
+              <I name={quickAdd ? 'x' : 'plus'} size={13}/>
+            </button>
+            <button className="row-btn" onClick={()=>{setDraftBudget(budget);setEditing(e=>!e);setQuickAdd(false);}} title="Modifier le budget" style={{flexShrink:0}}>
               <I name="edit" size={13}/>
             </button>
           </div>
+
+          {/* Saisie rapide inline */}
+          {quickAdd && (
+            <div style={{background:'var(--green-50)',borderRadius:14,padding:'12px 14px',display:'flex',flexDirection:'column',gap:10}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--green-800)',marginBottom:2}}>Saisie rapide · {cat.name}</div>
+              <input
+                ref={quickRef}
+                type="text"
+                className="input"
+                placeholder="Ex. Dîner resto"
+                value={quickLabel}
+                onChange={e=>setQuickLabel(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter')quickRef.current?.blur();}}
+                style={{padding:'8px 12px',fontSize:13}}
+              />
+              <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                <input
+                  type="number"
+                  className="input"
+                  placeholder="Montant"
+                  min={0}
+                  value={quickAmount}
+                  onChange={e=>setQuickAmount(e.target.value)}
+                  onKeyDown={e=>{if(e.key==='Enter')submitQuick();}}
+                  style={{flex:1,padding:'8px 12px',fontSize:13,textAlign:'right'}}
+                />
+                <span style={{fontSize:13,color:'var(--text-2)',fontWeight:600}}>€</span>
+                <button className="btn primary sm" onClick={submitQuick} style={{padding:'7px 14px',fontSize:12.5,whiteSpace:'nowrap'}}>
+                  Ajouter
+                </button>
+              </div>
+              {budget > 0 && (
+                <div style={{fontSize:11.5,color:'var(--text-3)'}}>
+                  {remaining > 0
+                    ? `Il reste ${fmtEUR(remaining)} sur ce budget`
+                    : `Budget dépassé de ${fmtEUR(Math.abs(remaining))}`}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Budget edit inline */}
           {editing && (
@@ -1939,7 +2016,7 @@
           {budget > 0 ? (
             <>
               <div style={{background:over?'var(--red-soft)':'var(--card-soft)',borderRadius:8,height:6,overflow:'hidden'}}>
-                <div style={{width:`${pct}%`,height:'100%',background:over?'var(--red)':pct>80?'var(--orange)':'var(--green-800)',borderRadius:8,transition:'width 500ms ease'}}/>
+                <div style={{width:`${pct}%`,height:'100%',background:barColor,borderRadius:8,transition:'width 500ms ease'}}/>
               </div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <span className="tnum" style={{fontSize:13,fontWeight:700,color:over?'var(--red)':'var(--text)'}}>{fmtEUR(spent)}</span>
@@ -2011,7 +2088,7 @@
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
               {allocs.map(cat => (
-                <BudgetCatCard key={cat.id} cat={cat} dispatch={dispatch} toast={toast}/>
+                <BudgetCatCard key={cat.id} cat={cat} dispatch={dispatch} toast={toast} selectedMonth={mk}/>
               ))}
             </div>
           </div>
