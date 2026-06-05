@@ -3407,6 +3407,9 @@
         case 'RESTORE_STATE':
           return { ...INITIAL_STATE, ...a.data, page: 'dashboard' };
 
+        case 'LOAD_STATE':
+          return { ...INITIAL_STATE, ...a.payload, page: s.page || 'dashboard' };
+
         case 'SET_URSSAF_ACTIVITY': {
           const r = a.actType === 'custom' ? a.rate : (URSSAF_ACTIVITIES.find(x=>x.value===a.actType)?.rate ?? s.urssafRate);
           return {...s, urssafActivityType: a.actType, urssafRate: r};
@@ -3543,6 +3546,49 @@
       );
     };
 
+    /* ═══════════════════════════════════════════════════
+       GIST SYNC
+       ═══════════════════════════════════════════════════ */
+    const GIST_TOKEN = localStorage.getItem('budgetisation_gist_token') || '';
+    const GIST_FILENAME = 'budgetisation-data.json';
+
+    const getToken = () => localStorage.getItem('budgetisation_gist_token') || '';
+
+    const gistRead = async (gistId) => {
+      const tok = getToken();
+      if (!tok) throw new Error('Token absent');
+      const r = await fetch(`https://api.github.com/gists/${gistId}`, {
+        headers: { Authorization: `token ${tok}` }
+      });
+      if (!r.ok) throw new Error('Gist introuvable');
+      const data = await r.json();
+      const content = data.files?.[GIST_FILENAME]?.content;
+      if (!content) throw new Error('Fichier absent du Gist');
+      return JSON.parse(content);
+    };
+
+    const gistWrite = async (gistId, payload) => {
+      const tok = getToken();
+      if (!tok) throw new Error('Token absent');
+      const body = { files: { [GIST_FILENAME]: { content: JSON.stringify(payload) } } };
+      if (gistId) {
+        await fetch(`https://api.github.com/gists/${gistId}`, {
+          method: 'PATCH',
+          headers: { Authorization: `token ${tok}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        return gistId;
+      } else {
+        const r = await fetch('https://api.github.com/gists', {
+          method: 'POST',
+          headers: { Authorization: `token ${tok}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, description: 'Budgétisation – données sync', public: false })
+        });
+        const d = await r.json();
+        return d.id;
+      }
+    };
+
     /* --- App root --- */
     const App = () => {
       const [state, dispatch] = useReducer(appReducer, undefined, () => {
@@ -3556,9 +3602,55 @@
       const [confirmState, setConfirmState] = useState(null);
       const [toasts,       setToasts]       = useState([]);
       const [searchQuery,  setSearchQuery]  = useState('');
+      const [syncStatus,   setSyncStatus]   = useState('idle');
+      const gistIdRef  = useRef(localStorage.getItem('budgetisation_gist') || null);
+      const syncTimer  = useRef(null);
+      const isFirstLoad = useRef(true);
 
+      /* Au démarrage : si ?gist=ID dans l'URL, charger depuis le Gist */
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const gistParam = params.get('gist');
+        if (gistParam) {
+          setSyncStatus('syncing');
+          gistRead(gistParam).then(data => {
+            dispatch({ type: 'LOAD_STATE', payload: data });
+            gistIdRef.current = gistParam;
+            localStorage.setItem('budgetisation_gist', gistParam);
+            window.history.replaceState({}, '', window.location.pathname);
+            setSyncStatus('ok');
+            setTimeout(() => setSyncStatus('idle'), 2000);
+          }).catch(() => { setSyncStatus('error'); setTimeout(() => setSyncStatus('idle'), 3000); });
+        } else if (gistIdRef.current) {
+          setSyncStatus('syncing');
+          gistRead(gistIdRef.current).then(data => {
+            dispatch({ type: 'LOAD_STATE', payload: data });
+            setSyncStatus('ok');
+            setTimeout(() => setSyncStatus('idle'), 2000);
+          }).catch(() => setSyncStatus('idle'));
+        }
+      }, []);
+
+      /* Sync vers Gist à chaque changement de state (debounced 2s) */
       useEffect(() => {
         try { localStorage.setItem('budgetisation', JSON.stringify(state)); } catch(e) {}
+        if (isFirstLoad.current) { isFirstLoad.current = false; return; }
+        clearTimeout(syncTimer.current);
+        syncTimer.current = setTimeout(async () => {
+          setSyncStatus('syncing');
+          try {
+            const id = await gistWrite(gistIdRef.current, state);
+            if (!gistIdRef.current) {
+              gistIdRef.current = id;
+              localStorage.setItem('budgetisation_gist', id);
+            }
+            setSyncStatus('ok');
+            setTimeout(() => setSyncStatus('idle'), 2000);
+          } catch(e) {
+            setSyncStatus('error');
+            setTimeout(() => setSyncStatus('idle'), 3000);
+          }
+        }, 2000);
       }, [state]);
 
       useEffect(() => {
@@ -3673,6 +3765,60 @@
           )}
 
           <ToastStack toasts={toasts}/>
+
+          {/* ── SYNC INDICATOR ── */}
+          <div style={{
+            position:'fixed', bottom:24, right:24, zIndex:100,
+            display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8
+          }}>
+            {/* Bouton partage */}
+            <button
+              onClick={() => {
+                const tok = localStorage.getItem('budgetisation_gist_token');
+                if (!tok) {
+                  const t = prompt('Colle ton token GitHub (ghp_...) pour activer la sync multi-appareils :');
+                  if (t && t.startsWith('ghp_')) {
+                    localStorage.setItem('budgetisation_gist_token', t.trim());
+                    toast('Token enregistré, sync activée !', 'check');
+                  } else if (t) {
+                    toast('Token invalide (doit commencer par ghp_)', 'x');
+                  }
+                  return;
+                }
+                const url = window.location.origin + window.location.pathname + (gistIdRef.current ? \`?gist=\${gistIdRef.current}\` : '');
+                navigator.clipboard.writeText(url).then(() => toast('Lien copié ! Colle-le sur ton autre appareil', 'check'));
+              }}
+              style={{
+                background:'var(--green-800)', color:'white',
+                border:'none', borderRadius:999, padding:'10px 16px',
+                fontSize:13, fontWeight:600, cursor:'pointer',
+                display:'flex', alignItems:'center', gap:8,
+                boxShadow:'0 4px 16px rgba(15,51,43,.25)'
+              }}
+              title="Copier le lien de synchronisation"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+              </svg>
+              Sync multi-appareils
+            </button>
+            {/* Indicateur statut */}
+            {syncStatus !== 'idle' && (
+              <div style={{
+                background:'white', border:'1px solid var(--border)',
+                borderRadius:999, padding:'7px 14px',
+                fontSize:12.5, fontWeight:600,
+                display:'flex', alignItems:'center', gap:7,
+                boxShadow:'0 2px 12px rgba(0,0,0,.08)',
+                color: syncStatus==='ok' ? 'var(--green-800)' : syncStatus==='error' ? 'var(--red)' : 'var(--text-2)'
+              }}>
+                {syncStatus==='syncing' && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>}
+                {syncStatus==='ok'      && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6 9 17l-5-5"/></svg>}
+                {syncStatus==='error'   && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>}
+                {syncStatus==='syncing' ? 'Sync en cours…' : syncStatus==='ok' ? 'Synchronisé' : 'Erreur sync'}
+              </div>
+            )}
+          </div>
         </div>
       );
     };
