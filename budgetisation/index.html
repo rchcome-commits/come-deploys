@@ -3607,9 +3607,20 @@
       const syncTimer  = useRef(null);
       const isFirstLoad = useRef(true);
 
-      /* Au démarrage : si ?gist=ID dans l'URL, charger depuis le Gist */
+      /* Au démarrage : si ?migrate=DATA dans l'URL, charger les données directement */
       useEffect(() => {
         const params = new URLSearchParams(window.location.search);
+        const migrateParam = params.get('migrate');
+        if (migrateParam) {
+          try {
+            const decoded = decodeURIComponent(escape(atob(migrateParam)));
+            const data = JSON.parse(decoded);
+            dispatch({ type: 'LOAD_STATE', payload: data });
+            localStorage.setItem('budgetisation', decoded);
+            window.history.replaceState({}, '', window.location.pathname);
+          } catch(e) { console.error('migrate error', e); }
+          return;
+        }
         const gistParam = params.get('gist');
         if (gistParam) {
           setSyncStatus('syncing');
