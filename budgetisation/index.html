@@ -3638,46 +3638,27 @@
     };
 
     /* ═══════════════════════════════════════════════════
-       GIST SYNC
+       SUPABASE SYNC
        ═══════════════════════════════════════════════════ */
-    const GIST_TOKEN = localStorage.getItem('budgetisation_gist_token') || '';
-    const GIST_FILENAME = 'budgetisation-data.json';
+    const SB_URL  = 'https://jnsogskfoteqcysugnqb.supabase.co';
+    const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impuc29nc2tmb3RlcWN5c3VnbnFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjU3OTksImV4cCI6MjA5Njg0MTc5OX0.Xkg_uiIHh323gUiywkl1JSJv7XUfLAQuYhb63wxshCM';
+    const SB_HDR  = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' };
 
-    const getToken = () => localStorage.getItem('budgetisation_gist_token') || '';
-
-    const gistRead = async (gistId) => {
-      const tok = getToken();
-      if (!tok) throw new Error('Token absent');
-      const r = await fetch(`https://api.github.com/gists/${gistId}`, {
-        headers: { Authorization: `token ${tok}` }
-      });
-      if (!r.ok) throw new Error('Gist introuvable');
-      const data = await r.json();
-      const content = data.files?.[GIST_FILENAME]?.content;
-      if (!content) throw new Error('Fichier absent du Gist');
-      return JSON.parse(content);
+    const sbRead = async () => {
+      const r = await fetch(`${SB_URL}/rest/v1/budget_data?id=eq.main&select=data`, { headers: SB_HDR });
+      if (!r.ok) throw new Error('Lecture Supabase échouée');
+      const rows = await r.json();
+      if (!rows.length) return null;
+      return rows[0].data;
     };
 
-    const gistWrite = async (gistId, payload) => {
-      const tok = getToken();
-      if (!tok) throw new Error('Token absent');
-      const body = { files: { [GIST_FILENAME]: { content: JSON.stringify(payload) } } };
-      if (gistId) {
-        await fetch(`https://api.github.com/gists/${gistId}`, {
-          method: 'PATCH',
-          headers: { Authorization: `token ${tok}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        return gistId;
-      } else {
-        const r = await fetch('https://api.github.com/gists', {
-          method: 'POST',
-          headers: { Authorization: `token ${tok}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, description: 'Budgétisation – données sync', public: false })
-        });
-        const d = await r.json();
-        return d.id;
-      }
+    const sbWrite = async (payload) => {
+      const r = await fetch(`${SB_URL}/rest/v1/budget_data`, {
+        method: 'POST',
+        headers: SB_HDR,
+        body: JSON.stringify({ id: 'main', data: payload, updated_at: new Date().toISOString() })
+      });
+      if (!r.ok) throw new Error('Écriture Supabase échouée');
     };
 
     /* --- App root --- */
@@ -3694,12 +3675,12 @@
       const [toasts,       setToasts]       = useState([]);
       const [searchQuery,  setSearchQuery]  = useState('');
       const [syncStatus,   setSyncStatus]   = useState('idle');
-      const gistIdRef  = useRef(localStorage.getItem('budgetisation_gist') || null);
-      const syncTimer  = useRef(null);
+      const syncTimer   = useRef(null);
       const isFirstLoad = useRef(true);
 
-      /* Au démarrage : si ?migrate=DATA dans l'URL, charger les données directement */
+      /* Au démarrage : charger depuis Supabase */
       useEffect(() => {
+        // Si ?migrate= dans l'URL, priorité aux données locales
         const params = new URLSearchParams(window.location.search);
         const migrateParam = params.get('migrate');
         if (migrateParam) {
@@ -3709,31 +3690,26 @@
             dispatch({ type: 'LOAD_STATE', payload: data });
             localStorage.setItem('budgetisation', decoded);
             window.history.replaceState({}, '', window.location.pathname);
+            // Écrire immédiatement dans Supabase
+            sbWrite(data).catch(()=>{});
           } catch(e) { console.error('migrate error', e); }
           return;
         }
-        const gistParam = params.get('gist');
-        if (gistParam) {
-          setSyncStatus('syncing');
-          gistRead(gistParam).then(data => {
+        // Charger depuis Supabase
+        setSyncStatus('syncing');
+        sbRead().then(data => {
+          if (data) {
             dispatch({ type: 'LOAD_STATE', payload: data });
-            gistIdRef.current = gistParam;
-            localStorage.setItem('budgetisation_gist', gistParam);
-            window.history.replaceState({}, '', window.location.pathname);
-            setSyncStatus('ok');
-            setTimeout(() => setSyncStatus('idle'), 2000);
-          }).catch(() => { setSyncStatus('error'); setTimeout(() => setSyncStatus('idle'), 3000); });
-        } else if (gistIdRef.current) {
-          setSyncStatus('syncing');
-          gistRead(gistIdRef.current).then(data => {
-            dispatch({ type: 'LOAD_STATE', payload: data });
-            setSyncStatus('ok');
-            setTimeout(() => setSyncStatus('idle'), 2000);
-          }).catch(() => setSyncStatus('idle'));
-        }
+            localStorage.setItem('budgetisation', JSON.stringify(data));
+          }
+          setSyncStatus('ok');
+          setTimeout(() => setSyncStatus('idle'), 2000);
+        }).catch(() => {
+          setSyncStatus('idle'); // Pas grave, on garde le localStorage
+        });
       }, []);
 
-      /* Sync vers Gist à chaque changement de state (debounced 2s) */
+      /* Sync vers Supabase à chaque changement de state (debounced 2s) */
       useEffect(() => {
         try { localStorage.setItem('budgetisation', JSON.stringify(state)); } catch(e) {}
         if (isFirstLoad.current) { isFirstLoad.current = false; return; }
@@ -3741,11 +3717,7 @@
         syncTimer.current = setTimeout(async () => {
           setSyncStatus('syncing');
           try {
-            const id = await gistWrite(gistIdRef.current, state);
-            if (!gistIdRef.current) {
-              gistIdRef.current = id;
-              localStorage.setItem('budgetisation_gist', id);
-            }
+            await sbWrite(state);
             setSyncStatus('ok');
             setTimeout(() => setSyncStatus('idle'), 2000);
           } catch(e) {
@@ -3873,22 +3845,11 @@
             position:'fixed', bottom:24, right:24, zIndex:100,
             display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8
           }}>
-            {/* Bouton partage */}
+            {/* Bouton sync */}
             <button
               onClick={() => {
-                const tok = localStorage.getItem('budgetisation_gist_token');
-                if (!tok) {
-                  const t = prompt('Colle ton token GitHub (ghp_...) pour activer la sync multi-appareils :');
-                  if (t && t.startsWith('ghp_')) {
-                    localStorage.setItem('budgetisation_gist_token', t.trim());
-                    toast('Token enregistré, sync activée !', 'check');
-                  } else if (t) {
-                    toast('Token invalide (doit commencer par ghp_)', 'x');
-                  }
-                  return;
-                }
-                const url = window.location.origin + window.location.pathname + (gistIdRef.current ? `?gist=${gistIdRef.current}` : '');
-                navigator.clipboard.writeText(url).then(() => toast('Lien copié ! Colle-le sur ton autre appareil', 'check'));
+                navigator.clipboard.writeText(window.location.origin + window.location.pathname)
+                  .then(() => toast('URL copiée ! Ouvre-la sur n'importe quel appareil', 'check'));
               }}
               style={{
                 background:'var(--green-800)', color:'white',
