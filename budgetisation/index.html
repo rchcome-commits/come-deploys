@@ -3642,10 +3642,15 @@
        ═══════════════════════════════════════════════════ */
     const SB_URL  = 'https://jnsogskfoteqcysugnqb.supabase.co';
     const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impuc29nc2tmb3RlcWN5c3VnbnFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjU3OTksImV4cCI6MjA5Njg0MTc5OX0.Xkg_uiIHh323gUiywkl1JSJv7XUfLAQuYhb63wxshCM';
-    const SB_HDR  = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates' };
+    const getSBHeaders = () => ({
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates'
+    });
 
     const sbRead = async () => {
-      const r = await fetch(`${SB_URL}/rest/v1/budget_data?id=eq.main&select=data`, { headers: SB_HDR });
+      const r = await fetch(SB_URL + '/rest/v1/budget_data?id=eq.main&select=data', { headers: getSBHeaders() });
       if (!r.ok) throw new Error('Lecture Supabase échouée');
       const rows = await r.json();
       if (!rows.length) return null;
@@ -3653,12 +3658,12 @@
     };
 
     const sbWrite = async (payload) => {
-      const r = await fetch(`${SB_URL}/rest/v1/budget_data`, {
+      const r = await fetch(SB_URL + '/rest/v1/budget_data', {
         method: 'POST',
-        headers: SB_HDR,
+        headers: getSBHeaders(),
         body: JSON.stringify({ id: 'main', data: payload, updated_at: new Date().toISOString() })
       });
-      if (!r.ok) throw new Error('Écriture Supabase échouée');
+      if (!r.ok) throw new Error('Ecriture Supabase echouee');
     };
 
     /* --- App root --- */
