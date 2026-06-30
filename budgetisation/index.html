@@ -773,7 +773,25 @@
 
     /* Core planning logic: planned allocations reduce income immediately */
     const getPlannedTotal      = (state) => state.categories.reduce((s, c) => s + (c.budget || 0), 0);
-    const getDisposableSurplus = (state) => getAvailableIncome(state) - getPlannedTotal(state);
+
+    /* Real overspend: somme des dépassements réels par catégorie ce mois (transactions > budget) */
+    const getCatOverspend = (state, mk) => {
+      const m = mk || state.selectedMonth;
+      return state.categories.reduce((sum, c) => {
+        const budget = c.budget || 0;
+        const spent  = state.transactions
+          .filter(t => t.mk === m && t.cat === c.id && t.amount < 0)
+          .reduce((s, t) => s + Math.abs(t.amount), 0);
+        const over = Math.max(0, spent - budget);
+        return sum + over;
+      }, 0);
+    };
+
+    /* Disposable surplus ajusté du dépassement réel des catégories */
+    const getDisposableSurplus = (state) => {
+      const overspend = getCatOverspend(state, state.selectedMonth);
+      return getAvailableIncome(state) - getPlannedTotal(state) - overspend;
+    };
 
     /* Surplus allocations — tracks amounts moved to savings budgets this month */
     const getAllocatedSurplus = (state, mk) => {
@@ -2540,8 +2558,9 @@
     };
 
     const Repartition = ({ state, dispatch, toast, askConfirm }) => {
-      const surplus      = getRemainingMonthlySurplus(state); /* income − planned − already allocated */
+      const surplus      = getRemainingMonthlySurplus(state); /* income − planned − already allocated − dépassements réels */
       const alreadyAlloc = getAllocatedSurplus(state);
+      const overspend    = getCatOverspend(state, state.selectedMonth);
       const pastAllocs   = (state.surplusAllocations||[]).filter(e=>e.month===state.selectedMonth);
       const secB         = getSecBudget(state);
       const missingSec   = Math.max(0, state.securityGoal - (secB?.current||0));
@@ -2619,8 +2638,14 @@
               </div>
               <div style={{fontSize:12.5,color:'rgba(255,255,255,.55)',marginTop:4}}>
                 {fmtEUR(getAvailableIncome(state))} revenus − {fmtEUR(getPlannedTotal(state))} réservés
+                {overspend > 0 && <> − {fmtEUR(overspend)} dépassés</>}
                 {alreadyAlloc > 0 && <> − {fmtEUR(alreadyAlloc)} alloués</>}
               </div>
+              {overspend > 0 && (
+                <div style={{fontSize:12,color:'#FCA5A5',marginTop:6}}>
+                  ⚠ Tes dépenses ont dépassé le budget de {fmtEUR(overspend)} ce mois — déduit automatiquement du surplus disponible
+                </div>
+              )}
               <div className="hero-bottom">
                 <div style={{fontSize:13.5,color:applyError?'#F36F6F':'white',fontWeight:600}}>
                   {applyError
