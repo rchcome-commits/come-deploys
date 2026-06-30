@@ -798,10 +798,23 @@
       const m = mk || state.selectedMonth;
       return (state.surplusAllocations || []).filter(a => a.month === m).reduce((s, a) => s + a.amount, 0);
     };
+
+    /* Déficit reporté : si un mois a été validé en dépassement, le manque grignote le surplus du mois suivant */
+    const getCarryoverDeficit = (state, mk) => {
+      const m = mk || state.selectedMonth;
+      const prevM = prevMK(m);
+      const prevSt = {...state, selectedMonth: prevM};
+      const prevSurplus  = getDisposableSurplus(prevSt);
+      const prevAlloc    = getAllocatedSurplus(state, prevM);
+      const prevDeficit  = Math.max(0, prevAlloc - prevSurplus);
+      return prevDeficit;
+    };
+
     const getRemainingMonthlySurplus = (state, mk) => {
       const m = mk || state.selectedMonth;
       const st = m === state.selectedMonth ? state : {...state, selectedMonth: m};
-      return getDisposableSurplus(st) - getAllocatedSurplus(state, m);
+      const carry = getCarryoverDeficit(state, m);
+      return getDisposableSurplus(st) - getAllocatedSurplus(state, m) - carry;
     };
 
     const getAllocPct           = (state) => {
@@ -2645,11 +2658,19 @@
 
       const setVal = (key, v) => setAlloc(prev=>({...prev,[key]:Math.max(0,Math.round(v))}));
 
-      const applyError = totalAlloc > surplus ? `Le montant réparti (${fmtEUR(totalAlloc)}) dépasse ton surplus disponible (${fmtEUR(surplus)}).` : null;
+      const overBudget = totalAlloc > surplus;
 
       const apply = () => {
-        if (applyError) { toast(applyError, 'x'); return; }
         if (totalAlloc <= 0) { toast('Aucun montant à répartir.', 'x'); return; }
+        if (overBudget) {
+          const deficit = totalAlloc - surplus;
+          const ok = window.confirm(`Tu répartis ${fmtEUR(deficit)} de plus que ton surplus disponible.\n\nCe manque sera automatiquement déduit de ton surplus du mois prochain.\n\nValider quand même ?`);
+          if (!ok) return;
+          dispatch({type:'APPLY_ALLOCATION', alloc});
+          setAlloc({});
+          toast(`Répartition validée — ${fmtEUR(deficit)} reportés sur le mois prochain`, 'check');
+          return;
+        }
         dispatch({type:'APPLY_ALLOCATION', alloc});
         setAlloc({});
         toast('Répartition appliquée — budgets mis à jour ✓');
@@ -2695,16 +2716,14 @@
                 </div>
               )}
               <div className="hero-bottom">
-                <div style={{fontSize:13.5,color:applyError?'#F36F6F':'white',fontWeight:600}}>
-                  {applyError
-                    ? `⚠ ${applyError}`
-                    : remaining===0
-                      ? '✓ Surplus entièrement réparti'
-                      : remaining>0
-                        ? `Reste ${fmtEUR(remaining)} à répartir`
-                        : `⚠ Tu dépasses de ${fmtEUR(Math.abs(remaining))}`}
+                <div style={{fontSize:13.5,color:remaining<0?'#F36F6F':'white',fontWeight:600}}>
+                  {remaining===0
+                    ? '✓ Surplus entièrement réparti'
+                    : remaining>0
+                      ? `Reste ${fmtEUR(remaining)} à répartir`
+                      : `⚠ Tu dépasses de ${fmtEUR(Math.abs(remaining))} — sera reporté sur le mois prochain`}
                 </div>
-                <div className="hero-pct" style={{background:remaining===0?'rgba(184,242,139,.18)':applyError?'rgba(243,111,111,.25)':'rgba(255,255,255,.12)'}}>
+                <div className="hero-pct" style={{background:remaining===0?'rgba(184,242,139,.18)':remaining<0?'rgba(243,111,111,.25)':'rgba(255,255,255,.12)'}}>
                   {surplus>0 ? Math.round((totalAlloc/surplus)*100) : 0}%
                 </div>
               </div>
@@ -2788,7 +2807,7 @@
                 </div>
                 <div style={{display:'flex',gap:10}}>
                   <Button variant="ghost" onClick={reset}>Annuler</Button>
-                  <Button variant="primary" leftIcon="check" disabled={!!applyError||surplus<=0||totalAlloc<=0} onClick={apply}>Valider la répartition</Button>
+                  <Button variant="primary" leftIcon="check" disabled={totalAlloc<=0} onClick={apply}>Valider la répartition</Button>
                 </div>
               </div>
             </div>
