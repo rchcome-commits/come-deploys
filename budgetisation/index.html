@@ -1561,6 +1561,14 @@
       const qAlreadyPaid  = qStatus === 'paye';
       const showUrssafAlert = qGross > 0 && !qAlreadyPaid;
 
+      /* ── Alerte "mois creux à venir" : le mois suivant a 0 revenu freelance prévu alors que ce mois-ci en a ── */
+      const nextMonthIncome   = getAvailableIncome(state, nextMk);
+      const nextMonthFixed    = getPlannedTotal(state); /* même structure de dépenses fixes d'un mois à l'autre */
+      const currentHasIncome  = available > 0;
+      const nextIsLean        = currentHasIncome && nextMonthIncome === 0;
+      const nextMonthGap      = nextIsLean ? Math.max(0, nextMonthFixed - nextMonthIncome) : 0;
+      const showLeanAlert     = nextIsLean && nextMonthGap > 0;
+
       const viewToggle = (
         <div style={{display:'flex',justifyContent:'flex-end'}}>
           <Segment items={[{value:'monthly',label:'Ce mois'},{value:'yearly',label:`Année ${year}`}]} value={viewMode} onChange={setViewMode}/>
@@ -1618,6 +1626,46 @@
                       padding:'6px 14px', cursor:'pointer'
                     }}>
                     Gérer →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── ALERTE MOIS CREUX À VENIR ── */}
+            {showLeanAlert && (
+              <div style={{
+                borderRadius:18,
+                background:'#FEE2E2',
+                border:'1.5px solid #F87171',
+                padding:'16px 20px',
+                display:'flex', alignItems:'center', gap:16,
+              }}>
+                <div style={{
+                  width:42, height:42, borderRadius:14, flexShrink:0,
+                  background:'#FECACA', display:'grid', placeItems:'center'
+                }}>
+                  <I name="wallet" size={18} color="#991B1B"/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700, fontSize:14.5, color:'#991B1B'}}>
+                    {MONTHS_FULL?.[parseInt(nextMk.split('-')[1])-1] || 'Mois prochain'} sans revenu freelance prévu
+                  </div>
+                  <div style={{fontSize:13, color:'#B91C1C', marginTop:3}}>
+                    Tes charges fixes ({fmtEUR(nextMonthFixed)}) tomberont sans rentrée d'argent prévue. Mets {fmtEUR(nextMonthGap)} de côté ce mois-ci pour les couvrir.
+                  </div>
+                </div>
+                <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8, flexShrink:0}}>
+                  <div style={{fontSize:22, fontWeight:800, color:'#991B1B'}}>
+                    {fmtEUR(nextMonthGap)}
+                  </div>
+                  <button
+                    onClick={() => navigate('repartition')}
+                    style={{
+                      fontSize:12.5, fontWeight:600, whiteSpace:'nowrap',
+                      background:'#DC2626', color:'white', border:'none',
+                      borderRadius:20, padding:'6px 14px', cursor:'pointer'
+                    }}>
+                    Provisionner →
                   </button>
                 </div>
               </div>
